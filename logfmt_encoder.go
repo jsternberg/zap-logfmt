@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -13,21 +14,33 @@ import (
 )
 
 const (
-	defaultTimeKey  = "timestamp"
-	defaultLevelKey = "level"
-	hex             = "0123456789abcdef"
+	defaultTimeKey    = "ts"
+	defaultLevelKey   = "level"
+	defaultMessageKey = "msg"
+	hex               = "0123456789abcdef"
+	_initialBufSize   = 1024
 )
 
+var logfmtPool = sync.Pool{New: func() interface{} {
+	return &logfmtEncoder{
+		bytes: make([]byte, 0, _initialBufSize),
+	}
+}}
+
 type logfmtEncoder struct {
-	bytes    []byte
-	timeKey  string
-	levelKey string
+	bytes      []byte
+	timeKey    string
+	levelKey   string
+	messageKey string
 }
 
 func NewLogfmtEncoder(options ...LogfmtOption) zap.Encoder {
-	enc := &logfmtEncoder{}
+	enc := logfmtPool.Get().(*logfmtEncoder)
+	enc.truncate()
+
 	enc.timeKey = defaultTimeKey
 	enc.levelKey = defaultLevelKey
+	enc.messageKey = defaultMessageKey
 	for _, opt := range options {
 		opt.apply(enc)
 	}
@@ -35,6 +48,7 @@ func NewLogfmtEncoder(options ...LogfmtOption) zap.Encoder {
 }
 
 func (enc *logfmtEncoder) Free() {
+	logfmtPool.Put(enc)
 }
 
 func (enc *logfmtEncoder) AddString(key, val string) {
@@ -90,11 +104,13 @@ func (enc *logfmtEncoder) AddObject(key string, obj interface{}) error {
 }
 
 func (enc *logfmtEncoder) Clone() zap.Encoder {
-	clone := &logfmtEncoder{}
-	clone.timeKey = enc.timeKey
-	clone.levelKey = enc.levelKey
+	clone := logfmtPool.Get().(*logfmtEncoder)
+	clone.truncate()
 	clone.bytes = make([]byte, 0, cap(clone.bytes))
 	clone.bytes = append(clone.bytes, enc.bytes...)
+	clone.timeKey = enc.timeKey
+	clone.levelKey = enc.levelKey
+	clone.messageKey = enc.messageKey
 	return clone
 }
 
@@ -103,9 +119,11 @@ func (enc *logfmtEncoder) WriteEntry(sink io.Writer, msg string, level zap.Level
 		return errors.New("can't write encoded message to a nil WriteSyncer")
 	}
 
-	final := logfmtEncoder{bytes: make([]byte, 0, len(msg)+len(enc.bytes)+20)}
+	final := logfmtPool.Get().(*logfmtEncoder)
+	final.truncate()
 	final.AddString(enc.timeKey, t.Format(time.RFC3339Nano))
 	final.AddString(enc.levelKey, level.String())
+	final.AddString(enc.messageKey, msg)
 	if len(enc.bytes) > 0 {
 		final.bytes = append(final.bytes, ' ')
 		final.bytes = append(final.bytes, enc.bytes...)
@@ -121,6 +139,10 @@ func (enc *logfmtEncoder) WriteEntry(sink io.Writer, msg string, level zap.Level
 		return fmt.Errorf("incomplete write: only wrote %v of %v bytes", n, expectedBytes)
 	}
 	return nil
+}
+
+func (enc *logfmtEncoder) truncate() {
+	enc.bytes = enc.bytes[:0]
 }
 
 func (enc *logfmtEncoder) addKey(key string) {
