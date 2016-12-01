@@ -14,21 +14,32 @@ import (
 )
 
 const (
-	defaultTimeF    = RFC3339Formatter("ts")
-	defaultLevelKey = LevelString("level")
-	defaultMessageF = MessageKey("msg")
-	hex             = "0123456789abcdef"
+	// For JSON-escaping; see logfmtEncoder.safeAddString below.
+	_hex = "0123456789abcdef"
+	// Initial buffer size for encoders.
 	_initialBufSize = 1024
 )
 
-var logfmtPool = sync.Pool{New: func() interface{} {
-	return &logfmtEncoder{
-		bytes: make([]byte, 0, _initialBufSize),
-	}
-}}
+var (
+	// errNilSink signals that Encoder.WriteEntry was called with a nil WriteSyncer.
+	errNilSink = errors.New("can't write encoded message a nil WriteSyncer")
+
+	// Default formatters for logfmt encoders.
+	defaultTimeF    = RFC3339Formatter("ts")
+	defaultLevelF   = LevelString("level")
+	defaultMessageF = MessageKey("msg")
+
+	logfmtPool = sync.Pool{New: func() interface{} {
+		return &logfmtEncoder{
+			// Pre-allocate a reasonably-sized buffer for each encoder.
+			bytes: make([]byte, 0, _initialBufSize),
+		}
+	}}
+)
 
 type logfmtEncoder struct {
 	bytes    []byte
+	prefix   []byte
 	timeF    TimeFormatter
 	levelF   LevelFormatter
 	messageF MessageFormatter
@@ -52,20 +63,22 @@ func (enc *logfmtEncoder) Free() {
 }
 
 func (enc *logfmtEncoder) AddString(key, val string) {
-	enc.addKey(key)
-	if strings.IndexFunc(val, needsQuotedValueRune) != -1 {
-		enc.safeAddString(val)
-	} else {
-		enc.bytes = append(enc.bytes, val...)
+	if enc.addKey(key) {
+		if strings.IndexFunc(val, needsQuotedValueRune) != -1 {
+			enc.safeAddString(val)
+		} else {
+			enc.bytes = append(enc.bytes, val...)
+		}
 	}
 }
 
 func (enc *logfmtEncoder) AddBool(key string, val bool) {
-	enc.addKey(key)
-	if val {
-		enc.bytes = append(enc.bytes, []byte("true")...)
-	} else {
-		enc.bytes = append(enc.bytes, []byte("false")...)
+	if enc.addKey(key) {
+		if val {
+			enc.bytes = append(enc.bytes, []byte("true")...)
+		} else {
+			enc.bytes = append(enc.bytes, []byte("false")...)
+		}
 	}
 }
 
@@ -74,8 +87,9 @@ func (enc *logfmtEncoder) AddInt(key string, val int) {
 }
 
 func (enc *logfmtEncoder) AddInt64(key string, val int64) {
-	enc.addKey(key)
-	enc.bytes = strconv.AppendInt(enc.bytes, val, 10)
+	if enc.addKey(key) {
+		enc.bytes = strconv.AppendInt(enc.bytes, val, 10)
+	}
 }
 
 func (enc *logfmtEncoder) AddUint(key string, val uint) {
@@ -83,24 +97,36 @@ func (enc *logfmtEncoder) AddUint(key string, val uint) {
 }
 
 func (enc *logfmtEncoder) AddUint64(key string, val uint64) {
-	enc.addKey(key)
-	enc.bytes = strconv.AppendUint(enc.bytes, val, 10)
+	if enc.addKey(key) {
+		enc.bytes = strconv.AppendUint(enc.bytes, val, 10)
+	}
 }
 
 func (enc *logfmtEncoder) AddUintptr(key string, val uintptr) {
+	enc.AddUint64(key, uint64(val))
 }
 
 func (enc *logfmtEncoder) AddFloat64(key string, val float64) {
-	enc.addKey(key)
-	enc.bytes = strconv.AppendFloat(enc.bytes, val, 'g', 3, 64)
+	if enc.addKey(key) {
+		enc.bytes = strconv.AppendFloat(enc.bytes, val, 'f', -1, 64)
+	}
 }
 
 func (enc *logfmtEncoder) AddMarshaler(key string, obj zap.LogMarshaler) error {
-	return errors.New("unimplemented")
+	prefix := append(enc.prefix, key...)
+	prefix = append(prefix, '.')
+	subenc := logfmtEncoder{
+		prefix: prefix,
+		bytes:  enc.bytes,
+	}
+	err := obj.MarshalLog(&subenc)
+	enc.bytes = subenc.bytes
+	return err
 }
 
 func (enc *logfmtEncoder) AddObject(key string, obj interface{}) error {
-	return errors.New("unimplemented")
+	enc.AddString(key, fmt.Sprintf("%+v", obj))
+	return nil
 }
 
 func (enc *logfmtEncoder) Clone() zap.Encoder {
@@ -145,12 +171,20 @@ func (enc *logfmtEncoder) truncate() {
 	enc.bytes = enc.bytes[:0]
 }
 
-func (enc *logfmtEncoder) addKey(key string) {
+func (enc *logfmtEncoder) addKey(key string) bool {
+	if len(key) == 0 || strings.IndexFunc(key, needsQuotedValueRune) != -1 {
+		return false
+	}
+
 	if len(enc.bytes) > 0 {
 		enc.bytes = append(enc.bytes, ' ')
 	}
+	if len(enc.prefix) > 0 {
+		enc.bytes = append(enc.bytes, enc.prefix...)
+	}
 	enc.bytes = append(enc.bytes, key...)
 	enc.bytes = append(enc.bytes, '=')
+	return true
 }
 
 func (enc *logfmtEncoder) safeAddString(val string) {
@@ -176,7 +210,7 @@ func (enc *logfmtEncoder) safeAddString(val string) {
 				enc.bytes = append(enc.bytes, '\\', 't')
 			default:
 				enc.bytes = append(enc.bytes, `\u00`...)
-				enc.bytes = append(enc.bytes, hex[b>>4], hex[b&0xF])
+				enc.bytes = append(enc.bytes, _hex[b>>4], _hex[b&0xF])
 			}
 			i++
 			start = i
