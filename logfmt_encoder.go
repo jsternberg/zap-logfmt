@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	defaultTimeKey    = "ts"
-	defaultLevelKey   = "level"
-	defaultMessageKey = "msg"
-	hex               = "0123456789abcdef"
-	_initialBufSize   = 1024
+	defaultTimeF    = RFC3339Formatter("ts")
+	defaultLevelKey = LevelString("level")
+	defaultMessageF = MessageKey("msg")
+	hex             = "0123456789abcdef"
+	_initialBufSize = 1024
 )
 
 var logfmtPool = sync.Pool{New: func() interface{} {
@@ -28,19 +28,19 @@ var logfmtPool = sync.Pool{New: func() interface{} {
 }}
 
 type logfmtEncoder struct {
-	bytes      []byte
-	timeKey    string
-	levelKey   string
-	messageKey string
+	bytes    []byte
+	timeF    TimeFormatter
+	levelF   LevelFormatter
+	messageF MessageFormatter
 }
 
 func NewLogfmtEncoder(options ...LogfmtOption) zap.Encoder {
 	enc := logfmtPool.Get().(*logfmtEncoder)
 	enc.truncate()
 
-	enc.timeKey = defaultTimeKey
-	enc.levelKey = defaultLevelKey
-	enc.messageKey = defaultMessageKey
+	enc.timeF = defaultTimeF
+	enc.levelF = defaultLevelF
+	enc.messageF = defaultMessageF
 	for _, opt := range options {
 		opt.apply(enc)
 	}
@@ -108,9 +108,9 @@ func (enc *logfmtEncoder) Clone() zap.Encoder {
 	clone.truncate()
 	clone.bytes = make([]byte, 0, cap(clone.bytes))
 	clone.bytes = append(clone.bytes, enc.bytes...)
-	clone.timeKey = enc.timeKey
-	clone.levelKey = enc.levelKey
-	clone.messageKey = enc.messageKey
+	clone.timeF = enc.timeF
+	clone.levelF = enc.levelF
+	clone.messageF = enc.messageF
 	return clone
 }
 
@@ -121,9 +121,9 @@ func (enc *logfmtEncoder) WriteEntry(sink io.Writer, msg string, level zap.Level
 
 	final := logfmtPool.Get().(*logfmtEncoder)
 	final.truncate()
-	final.AddString(enc.timeKey, t.Format(time.RFC3339Nano))
-	final.AddString(enc.levelKey, level.String())
-	final.AddString(enc.messageKey, msg)
+	enc.timeF(t).AddTo(final)
+	enc.levelF(level).AddTo(final)
+	enc.messageF(msg).AddTo(final)
 	if len(enc.bytes) > 0 {
 		final.bytes = append(final.bytes, ' ')
 		final.bytes = append(final.bytes, enc.bytes...)
@@ -202,8 +202,4 @@ func (enc *logfmtEncoder) safeAddString(val string) {
 
 func needsQuotedValueRune(r rune) bool {
 	return r <= ' ' || r == '=' || r == '"' || r == utf8.RuneError
-}
-
-type LogfmtOption interface {
-	apply(*logfmtEncoder)
 }
