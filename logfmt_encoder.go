@@ -1,4 +1,4 @@
-package zlogfmt
+package zaplogfmt
 
 import (
 	"errors"
@@ -45,7 +45,7 @@ type logfmtEncoder struct {
 	messageF MessageFormatter
 }
 
-func NewLogfmtEncoder(options ...LogfmtOption) zap.Encoder {
+func NewEncoder(options ...LogfmtOption) zap.Encoder {
 	enc := logfmtPool.Get().(*logfmtEncoder)
 	enc.truncate()
 

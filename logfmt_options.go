@@ -1,4 +1,4 @@
-package zlogfmt
+package zaplogfmt
 
 import (
 	"time"
