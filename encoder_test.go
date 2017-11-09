@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -107,4 +109,43 @@ func assertOutput(t testing.TB, desc string, expected string, f func(zapcore.Enc
 		expectedPrefix += " "
 	}
 	assert.Equal(t, expectedPrefix+expected, enc.buf.String(), "Unexpected encoder output after adding a %s as a second field.", desc)
+}
+
+func TestEncodeCaller(t *testing.T) {
+	enc := &logfmtEncoder{buf: bufferpool.Get(), EncoderConfig: &zapcore.EncoderConfig{
+		EncodeTime:     zapcore.EpochTimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}}
+
+	var buf *buffer.Buffer
+	var err error
+	encodeEntry := func() {
+		buf, err = enc.EncodeEntry(
+			zapcore.Entry{
+				Level:      zapcore.DebugLevel,
+				Time:       time.Time{},
+				LoggerName: "test",
+				Message:    "caller test",
+				Caller: zapcore.EntryCaller{
+					Defined: true,
+					File:    "h2g2.go",
+					Line:    42,
+				},
+			},
+			[]zapcore.Field{
+				zap.String("k", "v"),
+			},
+		)
+	}
+
+	encodeEntry()
+	assert.Nil(t, err)
+	assert.Equal(t, "k=v\n", buf.String())
+
+	enc.truncate()
+	enc.EncoderConfig.CallerKey = "caller"
+	encodeEntry()
+	assert.Nil(t, err)
+	assert.Equal(t, "caller=h2g2.go:42 k=v\n", buf.String())
 }
