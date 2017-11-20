@@ -133,11 +133,11 @@ func (enc *logfmtEncoder) AddUint64(key string, value uint64) {
 }
 
 func (enc *logfmtEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
-	return errors.New("unimplemented")
+	return ErrUnsupportedValueType
 }
 
 func (enc *logfmtEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
-	return errors.New("unimplemented")
+	return ErrUnsupportedValueType
 }
 
 func (enc *logfmtEncoder) AppendBool(value bool) {
