@@ -54,6 +54,23 @@ func TestEncoderObjectFields(t *testing.T) {
 		{"uint8", `k=42`, func(e zapcore.Encoder) { e.AddUint8("k", 42) }},
 		{"uintptr", `k=42`, func(e zapcore.Encoder) { e.AddUintptr("k", 42) }},
 		{
+			desc:     "array (success)",
+			expected: `k=a,b`,
+			f: func(e zapcore.Encoder) {
+				assert.NoError(
+					t,
+					e.AddArray(`k`, zapcore.ArrayMarshalerFunc(func(enc zapcore.ArrayEncoder) error {
+						for _, s := range []string{"a", "b"} {
+							enc.AppendString(s)
+						}
+						return nil
+					}),
+					),
+					"Unexpected error calling MarshalLogArray.",
+				)
+			},
+		},
+		{
 			desc:     "namespace",
 			expected: `outermost.outer.foo=1 outermost.outer.inner.foo=2`,
 			f: func(e zapcore.Encoder) {

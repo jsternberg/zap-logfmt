@@ -56,7 +56,19 @@ func NewEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 }
 
 func (enc *logfmtEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error {
-	return ErrUnsupportedValueType
+	marshaler := literalEncoder{
+		EncoderConfig: enc.EncoderConfig,
+		buf:           bufferpool.Get(),
+	}
+
+	err := arr.MarshalLogArray(&marshaler)
+	if err == nil {
+		enc.AddByteString(key, marshaler.buf.Bytes())
+	} else {
+		enc.AddByteString(key, nil)
+	}
+	marshaler.buf.Free()
+	return err
 }
 
 func (enc *logfmtEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
@@ -396,6 +408,110 @@ func (enc *logfmtEncoder) tryAddRuneError(r rune, size int) bool {
 		return true
 	}
 	return false
+}
+
+type literalEncoder struct {
+	*zapcore.EncoderConfig
+	buf *buffer.Buffer
+}
+
+func (enc *literalEncoder) AppendBool(value bool) {
+	enc.addSeparator()
+	if value {
+		enc.AppendString("true")
+	} else {
+		enc.AppendString("false")
+	}
+}
+
+func (enc *literalEncoder) AppendByteString(value []byte) {
+	enc.addSeparator()
+	enc.buf.AppendString(string(value))
+}
+
+func (enc *literalEncoder) AppendComplex128(value complex128) {
+	enc.addSeparator()
+	// Cast to a platform-independent, fixed-size type.
+	r, i := float64(real(value)), float64(imag(value))
+	enc.buf.AppendFloat(r, 64)
+	enc.buf.AppendByte('+')
+	enc.buf.AppendFloat(i, 64)
+	enc.buf.AppendByte('i')
+}
+
+func (enc *literalEncoder) AppendComplex64(value complex64) {
+	enc.AppendComplex128(complex128(value))
+}
+
+func (enc *literalEncoder) AppendFloat64(value float64) {
+	enc.addSeparator()
+	enc.buf.AppendFloat(value, 64)
+}
+
+func (enc *literalEncoder) AppendFloat32(value float32) {
+	enc.addSeparator()
+	enc.buf.AppendFloat(float64(value), 32)
+}
+
+func (enc *literalEncoder) AppendInt64(value int64) {
+	enc.addSeparator()
+	enc.buf.AppendInt(value)
+}
+
+func (enc *literalEncoder) AppendInt(v int)     { enc.AppendInt64(int64(v)) }
+func (enc *literalEncoder) AppendInt32(v int32) { enc.AppendInt64(int64(v)) }
+func (enc *literalEncoder) AppendInt16(v int16) { enc.AppendInt64(int64(v)) }
+func (enc *literalEncoder) AppendInt8(v int8)   { enc.AppendInt64(int64(v)) }
+
+func (enc *literalEncoder) AppendString(value string) {
+	enc.addSeparator()
+	enc.buf.AppendString(value)
+}
+
+func (enc *literalEncoder) AppendUint64(value uint64) {
+	enc.addSeparator()
+	enc.buf.AppendUint(value)
+}
+
+func (enc *literalEncoder) AppendUint(v uint)       { enc.AppendUint64(uint64(v)) }
+func (enc *literalEncoder) AppendUint32(v uint32)   { enc.AppendUint64(uint64(v)) }
+func (enc *literalEncoder) AppendUint16(v uint16)   { enc.AppendUint64(uint64(v)) }
+func (enc *literalEncoder) AppendUint8(v uint8)     { enc.AppendUint64(uint64(v)) }
+func (enc *literalEncoder) AppendUintptr(v uintptr) { enc.AppendUint64(uint64(v)) }
+
+func (enc *literalEncoder) AppendDuration(value time.Duration) {
+	cur := enc.buf.Len()
+	enc.EncodeDuration(value, enc)
+	if cur == enc.buf.Len() {
+		// User-supplied EncodeDuration is a no-op. Fall back to nanoseconds.
+		enc.AppendInt64(int64(value))
+	}
+}
+
+func (enc *literalEncoder) AppendTime(value time.Time) {
+	cur := enc.buf.Len()
+	enc.EncodeTime(value, enc)
+	if cur == enc.buf.Len() {
+		enc.AppendInt64(value.UnixNano())
+	}
+}
+
+func (enc *literalEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
+	return arr.MarshalLogArray(enc)
+}
+
+func (enc *literalEncoder) AppendObject(zapcore.ObjectMarshaler) error {
+	return ErrUnsupportedValueType
+}
+
+func (enc *literalEncoder) AppendReflected(value interface{}) error {
+	return ErrUnsupportedValueType
+}
+
+func (enc *literalEncoder) addSeparator() {
+	if enc.buf.Len() > 0 {
+		enc.buf.AppendByte(',')
+	}
 }
 
 func needsQuotedValueRune(r rune) bool {
