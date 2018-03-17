@@ -56,19 +56,8 @@ func NewEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 }
 
 func (enc *logfmtEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error {
-	marshaler := literalEncoder{
-		EncoderConfig: enc.EncoderConfig,
-		buf:           bufferpool.Get(),
-	}
-
-	err := arr.MarshalLogArray(&marshaler)
-	if err == nil {
-		enc.AddByteString(key, marshaler.buf.Bytes())
-	} else {
-		enc.AddByteString(key, nil)
-	}
-	marshaler.buf.Free()
-	return err
+	enc.addKey(key)
+	return enc.AppendArray(arr)
 }
 
 func (enc *logfmtEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
@@ -112,9 +101,9 @@ func (enc *logfmtEncoder) AddInt64(key string, value int64) {
 func (enc *logfmtEncoder) AddReflected(key string, value interface{}) error {
 	rvalue := reflect.ValueOf(value)
 	switch rvalue.Kind() {
-	case reflect.Array, reflect.Chan, reflect.Func, reflect.Map, reflect.Slice, reflect.Struct:
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Struct:
 		return ErrUnsupportedValueType
-	case reflect.Ptr:
+	case reflect.Array, reflect.Slice, reflect.Ptr:
 		if rvalue.IsNil() {
 			enc.AddByteString(key, nil)
 			return nil
@@ -145,7 +134,19 @@ func (enc *logfmtEncoder) AddUint64(key string, value uint64) {
 }
 
 func (enc *logfmtEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
-	return ErrUnsupportedValueType
+	marshaler := literalEncoder{
+		EncoderConfig: enc.EncoderConfig,
+		buf:           bufferpool.Get(),
+	}
+
+	err := arr.MarshalLogArray(&marshaler)
+	if err == nil {
+		enc.AppendByteString(marshaler.buf.Bytes())
+	} else {
+		enc.AppendByteString(nil)
+	}
+	marshaler.buf.Free()
+	return err
 }
 
 func (enc *logfmtEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
