@@ -305,6 +305,9 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 		final.buf.Write(enc.buf.Bytes())
 	}
 	addFields(final, fields)
+	if ent.Stack != "" && final.StacktraceKey != "" {
+		final.AddString(final.StacktraceKey, ent.Stack)
+	}
 	if final.LineEnding != "" {
 		final.buf.AppendString(final.LineEnding)
 	} else {
