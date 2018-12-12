@@ -301,7 +301,9 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 		final.AppendString(ent.Message)
 	}
 	if enc.buf.Len() > 0 {
-		final.buf.AppendByte(' ')
+		if final.buf.Len() > 0 {
+			final.buf.AppendByte(' ')
+		}
 		final.buf.Write(enc.buf.Bytes())
 	}
 	addFields(final, fields)
