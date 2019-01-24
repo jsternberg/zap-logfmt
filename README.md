@@ -2,6 +2,8 @@
 
 This package provides a logfmt encoder for [zap][zap].
 
+[![GoDoc](https://godoc.org/github.com/sykesm/zap-logfmt?status.svg)](https://godoc.org/github.com/sykesm/zap-logfmt)
+
 ## Usage
 
 The encoder is easy to configure. Simply create a new core with an instance of the logfmt encoder and use it with your preferred logging interface.
@@ -12,40 +14,13 @@ package main
 import (
     "os"
 
-    "github.com/allir/zap-logfmt"
+    "github.com/sykesm/zap-logfmt"
     "go.uber.org/zap"
     "go.uber.org/zap/zapcore"
 )
 
 func main() {
     config := zap.NewProductionEncoderConfig()
-    logger := zap.New(zapcore.NewCore(
-        zaplogfmt.NewEncoder(config),
-        zapcore.Lock(os.Stdout),
-        zapcore.DebugLevel,
-    ))
-    defer logger.Sync()
-
-    logger.Info("Hello World")
-}
-```
-
-To use RFC3339 output for the time instead of an integer timestamp, you provide EncodeTime to the EncoderConfig:
-
-```go
-package main
-
-import (
-    "os"
-
-    "github.com/allir/zap-logfmt"
-    "go.uber.org/zap"
-    "go.uber.org/zap/zapcore"
-)
-
-func main() {
-    config := zap.NewProductionEncoderConfig()
-    config.EncodeTime = zapcore.RFC3339TimeEncoder
     logger := zap.New(zapcore.NewCore(
         zaplogfmt.NewEncoder(config),
         zapcore.Lock(os.Stdout),
@@ -85,13 +60,25 @@ func main() {
 }
 ```
 
-## Limitations
+## Arrays, Objects, and Reflected Fields
 
-It is not possible to log an array, channel, function, map, slice, or
-struct. Functions and channels since they don't really have a suitable
-representation to begin with. Logfmt does not have a method of
-outputting arrays or maps so arrays, slices, maps, and structs cannot be
-rendered.
+While it's best to avoid complex data types in log fields, there are times when they sneak in. When complex fields are included in log records, they will be encoded, but they won't be very pretty.
+
+### Arrays
+
+Arrays are encoded as a comma separated list of values within square brackets. This format is very similar to JSON encoding. Arrays of simple scalars remain quite readable but including elements that require quoting will result in very ugly records.
+
+### Objects
+
+Objects are encoded as a space separated list of _key=value_ pairs. Because this format includes an equals sign, the encoded object will require quoting. If any value in the object requires quoting, the required escapes will make the encoded field pretty difficult for humans to read.
+
+### Channels and Functions
+
+Channels and functions are encoded as their type and their address. Therearen't many meaningful ways to log channels and functions...
+
+### Maps and Structs
+
+Maps and structs are encoded as strings that contain the result of `fmt.Sprint`.
 
 ## Namespaces
 

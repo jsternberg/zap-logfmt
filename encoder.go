@@ -3,8 +3,9 @@ package zaplogfmt
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -19,32 +20,39 @@ import (
 )
 
 var (
-	_logfmtPool = sync.Pool{New: func() interface{} {
+	logfmtPool = sync.Pool{New: func() interface{} {
 		return &logfmtEncoder{}
 	}}
 
 	bufferpool = buffer.NewPool()
 )
 
-// Errors returned from this package may be tested against using errors.Is.
-var (
-	ErrUnsupportedValueType = errors.New("unsupported value type")
-)
+// Register adds an encoder to zap named "logfmt" that can be used with
+// zapcore.EncoderConfig.
+func Register() {
+	zap.RegisterEncoder("logfmt", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		enc := NewEncoder(cfg)
+		return enc, nil
+	})
+}
 
 func getEncoder() *logfmtEncoder {
-	return _logfmtPool.Get().(*logfmtEncoder)
+	return logfmtPool.Get().(*logfmtEncoder)
 }
 
 func putEncoder(enc *logfmtEncoder) {
 	enc.EncoderConfig = nil
 	enc.buf = nil
-	_logfmtPool.Put(enc)
+	enc.namespaces = nil
+	enc.arrayLiteral = false
+	logfmtPool.Put(enc)
 }
 
 type logfmtEncoder struct {
 	*zapcore.EncoderConfig
-	buf        *buffer.Buffer
-	namespaces []string
+	buf          *buffer.Buffer
+	arrayLiteral bool
+	namespaces   []string
 }
 
 // NewEncoder creates an encoder interface for zap that writes logfmt formatted log entries.
@@ -60,17 +68,8 @@ func (enc *logfmtEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error
 	return enc.AppendArray(arr)
 }
 
-func (enc *logfmtEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
-	return ErrUnsupportedValueType
-}
-
 func (enc *logfmtEncoder) AddBinary(key string, value []byte) {
 	enc.AddString(key, base64.StdEncoding.EncodeToString(value))
-}
-
-func (enc *logfmtEncoder) AddByteString(key string, value []byte) {
-	enc.addKey(key)
-	enc.AppendByteString(value)
 }
 
 func (enc *logfmtEncoder) AddBool(key string, value bool) {
@@ -78,6 +77,12 @@ func (enc *logfmtEncoder) AddBool(key string, value bool) {
 	enc.AppendBool(value)
 }
 
+func (enc *logfmtEncoder) AddByteString(key string, value []byte) {
+	enc.addKey(key)
+	enc.AppendByteString(value)
+}
+
+func (enc *logfmtEncoder) AddComplex64(k string, v complex64) { enc.AddComplex128(k, complex128(v)) }
 func (enc *logfmtEncoder) AddComplex128(key string, value complex128) {
 	enc.addKey(key)
 	enc.AppendComplex128(value)
@@ -88,23 +93,32 @@ func (enc *logfmtEncoder) AddDuration(key string, value time.Duration) {
 	enc.AppendDuration(value)
 }
 
+func (enc *logfmtEncoder) AddFloat32(key string, value float32) {
+	enc.addKey(key)
+	enc.AppendFloat32(value)
+}
 func (enc *logfmtEncoder) AddFloat64(key string, value float64) {
 	enc.addKey(key)
 	enc.AppendFloat64(value)
 }
 
+func (enc *logfmtEncoder) AddInt(k string, v int)     { enc.AddInt64(k, int64(v)) }
+func (enc *logfmtEncoder) AddInt8(k string, v int8)   { enc.AddInt64(k, int64(v)) }
+func (enc *logfmtEncoder) AddInt16(k string, v int16) { enc.AddInt64(k, int64(v)) }
+func (enc *logfmtEncoder) AddInt32(k string, v int32) { enc.AddInt64(k, int64(v)) }
 func (enc *logfmtEncoder) AddInt64(key string, value int64) {
 	enc.addKey(key)
 	enc.AppendInt64(value)
 }
 
+func (enc *logfmtEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
+	enc.addKey(key)
+	return enc.AppendObject(obj)
+}
+
 func (enc *logfmtEncoder) AddReflected(key string, value interface{}) error {
 	enc.addKey(key)
 	return enc.AppendReflected(value)
-}
-
-func (enc *logfmtEncoder) OpenNamespace(key string) {
-	enc.namespaces = append(enc.namespaces, key)
 }
 
 func (enc *logfmtEncoder) AddString(key, value string) {
@@ -117,29 +131,33 @@ func (enc *logfmtEncoder) AddTime(key string, value time.Time) {
 	enc.AppendTime(value)
 }
 
+func (enc *logfmtEncoder) AddUint(k string, v uint)       { enc.AddUint64(k, uint64(v)) }
+func (enc *logfmtEncoder) AddUint8(k string, v uint8)     { enc.AddUint64(k, uint64(v)) }
+func (enc *logfmtEncoder) AddUint16(k string, v uint16)   { enc.AddUint64(k, uint64(v)) }
+func (enc *logfmtEncoder) AddUint32(k string, v uint32)   { enc.AddUint64(k, uint64(v)) }
+func (enc *logfmtEncoder) AddUintptr(k string, v uintptr) { enc.AddUint64(k, uint64(v)) }
 func (enc *logfmtEncoder) AddUint64(key string, value uint64) {
 	enc.addKey(key)
 	enc.AppendUint64(value)
 }
 
 func (enc *logfmtEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
-	marshaler := literalEncoder{
-		EncoderConfig: enc.EncoderConfig,
-		buf:           bufferpool.Get(),
-	}
+	marshaler := enc.clone()
+	marshaler.namespaces = nil
+	marshaler.arrayLiteral = true
 
-	err := arr.MarshalLogArray(&marshaler)
+	marshaler.buf.AppendByte('[')
+	err := arr.MarshalLogArray(marshaler)
 	if err == nil {
+		marshaler.buf.AppendByte(']')
 		enc.AppendByteString(marshaler.buf.Bytes())
 	} else {
 		enc.AppendByteString(nil)
 	}
 	marshaler.buf.Free()
-	return err
-}
+	putEncoder(marshaler)
 
-func (enc *logfmtEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
-	return ErrUnsupportedValueType
+	return err
 }
 
 func (enc *logfmtEncoder) AppendBool(value bool) {
@@ -151,6 +169,8 @@ func (enc *logfmtEncoder) AppendBool(value bool) {
 }
 
 func (enc *logfmtEncoder) AppendByteString(value []byte) {
+	enc.addSeparator()
+
 	needsQuotes := bytes.IndexFunc(value, needsQuotedValueRune) != -1
 	if needsQuotes {
 		enc.buf.AppendByte('"')
@@ -161,7 +181,10 @@ func (enc *logfmtEncoder) AppendByteString(value []byte) {
 	}
 }
 
+func (enc *logfmtEncoder) AppendComplex64(v complex64) { enc.AppendComplex128(complex128(v)) }
 func (enc *logfmtEncoder) AppendComplex128(value complex128) {
+	enc.addSeparator()
+
 	// Cast to a platform-independent, fixed-size type.
 	r, i := float64(real(value)), float64(imag(value))
 	enc.buf.AppendFloat(r, 64)
@@ -172,52 +195,125 @@ func (enc *logfmtEncoder) AppendComplex128(value complex128) {
 
 func (enc *logfmtEncoder) AppendDuration(value time.Duration) {
 	cur := enc.buf.Len()
-	enc.EncodeDuration(value, enc)
+	if enc.EncodeDuration != nil {
+		enc.EncodeDuration(value, enc)
+	}
 	if cur == enc.buf.Len() {
-		// User-supplied EncodeDuration is a no-op. Fall back to nanoseconds.
 		enc.AppendInt64(int64(value))
 	}
 }
 
+func (enc *logfmtEncoder) AppendFloat32(v float32) { enc.appendFloat(float64(v), 32) }
+func (enc *logfmtEncoder) AppendFloat64(v float64) { enc.appendFloat(v, 64) }
+func (enc *logfmtEncoder) appendFloat(val float64, bitSize int) {
+	enc.addSeparator()
+
+	switch {
+	case math.IsNaN(val):
+		enc.buf.AppendString(`NaN`)
+	case math.IsInf(val, 1):
+		enc.buf.AppendString(`+Inf`)
+	case math.IsInf(val, -1):
+		enc.buf.AppendString(`-Inf`)
+	default:
+		enc.buf.AppendFloat(val, bitSize)
+	}
+}
+
+func (enc *logfmtEncoder) AppendInt(v int)     { enc.AppendInt64(int64(v)) }
+func (enc *logfmtEncoder) AppendInt16(v int16) { enc.AppendInt64(int64(v)) }
+func (enc *logfmtEncoder) AppendInt8(v int8)   { enc.AppendInt64(int64(v)) }
+func (enc *logfmtEncoder) AppendInt32(v int32) { enc.AppendInt64(int64(v)) }
 func (enc *logfmtEncoder) AppendInt64(value int64) {
+	enc.addSeparator()
 	enc.buf.AppendInt(value)
 }
 
-func (enc *logfmtEncoder) AppendReflected(value interface{}) error {
-	rvalue := reflect.ValueOf(value)
-	switch rvalue.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Map, reflect.Struct:
-		return ErrUnsupportedValueType
-	case reflect.Slice:
-		if rvalue.IsNil() {
-			enc.AppendByteString(nil)
-			return nil
-		}
-		// A non-nil slice is handled identically to an array.
-		fallthrough
-	case reflect.Array:
-		marshal := zapcore.ArrayMarshalerFunc(func(aenc zapcore.ArrayEncoder) error {
-			for i := 0; i < rvalue.Len(); i++ {
-				v := rvalue.Index(i).Interface()
-				if err := aenc.AppendReflected(v); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		return enc.AppendArray(marshal)
-	case reflect.Ptr:
-		if rvalue.IsNil() {
-			enc.AppendByteString(nil)
-			return nil
-		}
-		return enc.AppendReflected(rvalue.Elem().Interface())
+func (enc *logfmtEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
+	marshaler := enc.clone()
+	marshaler.namespaces = nil
+
+	err := obj.MarshalLogObject(marshaler)
+	if err == nil {
+		enc.AppendByteString(marshaler.buf.Bytes())
+	} else {
+		enc.AppendByteString(nil)
 	}
-	enc.AppendString(fmt.Sprint(value))
+	marshaler.buf.Free()
+	putEncoder(marshaler)
+	return err
+}
+
+func (enc *logfmtEncoder) AppendReflected(value interface{}) error {
+	switch v := value.(type) {
+	case nil:
+		enc.AppendString("null")
+	case error:
+		enc.AppendString(v.Error())
+	case []byte:
+		enc.AppendByteString(v)
+	case fmt.Stringer:
+		enc.AppendString(v.String())
+	case encoding.TextMarshaler:
+		b, err := v.MarshalText()
+		if err != nil {
+			return err
+		}
+		enc.AppendString(string(b))
+	case json.Marshaler:
+		b, err := v.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		enc.AppendString(string(b))
+	default:
+		rvalue := reflect.ValueOf(value)
+		switch rvalue.Kind() {
+		case reflect.Bool:
+			enc.AppendBool(rvalue.Bool())
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			enc.AppendInt64(rvalue.Int())
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			enc.AppendUint64(rvalue.Uint())
+
+		case reflect.Float32:
+			enc.appendFloat(rvalue.Float(), 32)
+
+		case reflect.Float64:
+			enc.appendFloat(rvalue.Float(), 64)
+
+		case reflect.String:
+			enc.AppendString(rvalue.String())
+
+		case reflect.Complex64, reflect.Complex128:
+			enc.AppendComplex128(rvalue.Complex())
+
+		case reflect.Map, reflect.Struct:
+			enc.AppendString(fmt.Sprint(value))
+
+		case reflect.Chan, reflect.Func:
+			enc.AppendString(fmt.Sprintf("%T(%+v)", value, value))
+
+		case reflect.Array, reflect.Slice:
+			enc.AppendArray(zapcore.ArrayMarshalerFunc(func(e zapcore.ArrayEncoder) error {
+				for i := 0; i < rvalue.Len(); i++ {
+					e.AppendReflected(rvalue.Index(i).Interface())
+				}
+				return nil
+			}))
+
+		case reflect.Interface, reflect.Ptr:
+			return enc.AppendReflected(rvalue.Elem().Interface())
+		}
+	}
 	return nil
 }
 
 func (enc *logfmtEncoder) AppendString(value string) {
+	enc.addSeparator()
+
 	needsQuotes := strings.IndexFunc(value, needsQuotedValueRune) != -1
 	if needsQuotes {
 		enc.buf.AppendByte('"')
@@ -230,39 +326,23 @@ func (enc *logfmtEncoder) AppendString(value string) {
 
 func (enc *logfmtEncoder) AppendTime(value time.Time) {
 	cur := enc.buf.Len()
-	enc.EncodeTime(value, enc)
+	if enc.EncodeTime != nil {
+		enc.EncodeTime(value, enc)
+	}
 	if cur == enc.buf.Len() {
 		enc.AppendInt64(value.UnixNano())
 	}
 }
 
+func (enc *logfmtEncoder) AppendUint(v uint)       { enc.AppendUint64(uint64(v)) }
+func (enc *logfmtEncoder) AppendUint8(v uint8)     { enc.AppendUint64(uint64(v)) }
+func (enc *logfmtEncoder) AppendUint16(v uint16)   { enc.AppendUint64(uint64(v)) }
+func (enc *logfmtEncoder) AppendUint32(v uint32)   { enc.AppendUint64(uint64(v)) }
+func (enc *logfmtEncoder) AppendUintptr(v uintptr) { enc.AppendUint64(uint64(v)) }
 func (enc *logfmtEncoder) AppendUint64(value uint64) {
+	enc.addSeparator()
 	enc.buf.AppendUint(value)
 }
-
-func (enc *logfmtEncoder) AddComplex64(k string, v complex64) { enc.AddComplex128(k, complex128(v)) }
-func (enc *logfmtEncoder) AddFloat32(k string, v float32)     { enc.AddFloat64(k, float64(v)) }
-func (enc *logfmtEncoder) AddInt(k string, v int)             { enc.AddInt64(k, int64(v)) }
-func (enc *logfmtEncoder) AddInt32(k string, v int32)         { enc.AddInt64(k, int64(v)) }
-func (enc *logfmtEncoder) AddInt16(k string, v int16)         { enc.AddInt64(k, int64(v)) }
-func (enc *logfmtEncoder) AddInt8(k string, v int8)           { enc.AddInt64(k, int64(v)) }
-func (enc *logfmtEncoder) AddUint(k string, v uint)           { enc.AddUint64(k, uint64(v)) }
-func (enc *logfmtEncoder) AddUint32(k string, v uint32)       { enc.AddUint64(k, uint64(v)) }
-func (enc *logfmtEncoder) AddUint16(k string, v uint16)       { enc.AddUint64(k, uint64(v)) }
-func (enc *logfmtEncoder) AddUint8(k string, v uint8)         { enc.AddUint64(k, uint64(v)) }
-func (enc *logfmtEncoder) AddUintptr(k string, v uintptr)     { enc.AddUint64(k, uint64(v)) }
-func (enc *logfmtEncoder) AppendComplex64(v complex64)        { enc.AppendComplex128(complex128(v)) }
-func (enc *logfmtEncoder) AppendFloat64(v float64)            { enc.appendFloat(v, 64) }
-func (enc *logfmtEncoder) AppendFloat32(v float32)            { enc.appendFloat(float64(v), 32) }
-func (enc *logfmtEncoder) AppendInt(v int)                    { enc.AppendInt64(int64(v)) }
-func (enc *logfmtEncoder) AppendInt32(v int32)                { enc.AppendInt64(int64(v)) }
-func (enc *logfmtEncoder) AppendInt16(v int16)                { enc.AppendInt64(int64(v)) }
-func (enc *logfmtEncoder) AppendInt8(v int8)                  { enc.AppendInt64(int64(v)) }
-func (enc *logfmtEncoder) AppendUint(v uint)                  { enc.AppendUint64(uint64(v)) }
-func (enc *logfmtEncoder) AppendUint32(v uint32)              { enc.AppendUint64(uint64(v)) }
-func (enc *logfmtEncoder) AppendUint16(v uint16)              { enc.AppendUint64(uint64(v)) }
-func (enc *logfmtEncoder) AppendUint8(v uint8)                { enc.AppendUint64(uint64(v)) }
-func (enc *logfmtEncoder) AppendUintptr(v uintptr)            { enc.AppendUint64(uint64(v)) }
 
 func (enc *logfmtEncoder) Clone() zapcore.Encoder {
 	clone := enc.clone()
@@ -278,6 +358,11 @@ func (enc *logfmtEncoder) clone() *logfmtEncoder {
 	return clone
 }
 
+func (enc *logfmtEncoder) OpenNamespace(key string) {
+	key = strings.Map(keyRuneFilter, key)
+	enc.namespaces = append(enc.namespaces, key)
+}
+
 func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	final := enc.clone()
 	if final.TimeKey != "" {
@@ -286,25 +371,38 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 	if final.LevelKey != "" {
 		final.addKey(final.LevelKey)
 		cur := final.buf.Len()
-		final.EncodeLevel(ent.Level, final)
+		if final.EncodeLevel != nil {
+			final.EncodeLevel(ent.Level, final)
+		}
 		if cur == final.buf.Len() {
-			// User-supplied EncodeLevel was a no-op. Fall back to strings to keep output valid.
+			// User-supplied EncodeLevel was a no-op. Fall back to strings to keep
+			// output valid.
 			final.AppendString(ent.Level.String())
 		}
 	}
-	if final.NameKey != "" && ent.LoggerName != "" {
-		final.addKey(enc.NameKey)
-		final.AppendString(ent.LoggerName)
+	if ent.LoggerName != "" && final.NameKey != "" {
+		final.addKey(final.NameKey)
+		cur := final.buf.Len()
+		if final.EncodeName != nil {
+			final.EncodeName(ent.LoggerName, final)
+		}
+		if cur == final.buf.Len() {
+			// User-supplied EncodeName was a no-op. Fall back to strings to
+			// keep output valid.
+			final.AppendString(ent.LoggerName)
+		}
 	}
 	if ent.Caller.Defined && final.CallerKey != "" {
 		final.addKey(final.CallerKey)
 		cur := final.buf.Len()
-		final.EncodeCaller(ent.Caller, final)
+		if final.EncodeCaller != nil {
+			final.EncodeCaller(ent.Caller, final)
+		}
 		if cur == final.buf.Len() {
 			// User-supplied EncodeCaller was a no-op. Fall back to strings to keep output valid.
 			final.AppendString(ent.Caller.String())
 		}
-		if final.FunctionKey != "" {
+		if ent.Caller.Function != "" && enc.FunctionKey != "" {
 			final.addKey(final.FunctionKey)
 			final.AppendString(ent.Caller.Function)
 		}
@@ -334,12 +432,19 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 	return ret, nil
 }
 
-func (enc *logfmtEncoder) truncate() {
-	enc.buf.Reset()
-	enc.namespaces = nil
+func (enc *logfmtEncoder) addSeparator() {
+	if !enc.arrayLiteral {
+		return
+	}
+
+	last := enc.buf.Len() - 1
+	if last >= 0 && enc.buf.Bytes()[last] != '[' {
+		enc.buf.AppendByte(',')
+	}
 }
 
 func (enc *logfmtEncoder) addKey(key string) {
+	key = strings.Map(keyRuneFilter, key)
 	if enc.buf.Len() > 0 {
 		enc.buf.AppendByte(' ')
 	}
@@ -349,19 +454,6 @@ func (enc *logfmtEncoder) addKey(key string) {
 	}
 	enc.safeAddString(key)
 	enc.buf.AppendByte('=')
-}
-
-func (enc *logfmtEncoder) appendFloat(val float64, bitSize int) {
-	switch {
-	case math.IsNaN(val):
-		enc.buf.AppendString(`NaN`)
-	case math.IsInf(val, 1):
-		enc.buf.AppendString(`+Inf`)
-	case math.IsInf(val, -1):
-		enc.buf.AppendString(`-Inf`)
-	default:
-		enc.buf.AppendFloat(val, bitSize)
-	}
 }
 
 // safeAddString JSON-escapes a string and appends it to the internal buffer.
@@ -442,153 +534,19 @@ func (enc *logfmtEncoder) tryAddRuneError(r rune, size int) bool {
 	return false
 }
 
-type literalEncoder struct {
-	*zapcore.EncoderConfig
-	buf *buffer.Buffer
-}
-
-func (enc *literalEncoder) AppendBool(value bool) {
-	enc.addSeparator()
-	if value {
-		enc.AppendString("true")
-	} else {
-		enc.AppendString("false")
-	}
-}
-
-func (enc *literalEncoder) AppendByteString(value []byte) {
-	enc.addSeparator()
-	enc.buf.AppendString(string(value))
-}
-
-func (enc *literalEncoder) AppendComplex128(value complex128) {
-	enc.addSeparator()
-	// Cast to a platform-independent, fixed-size type.
-	r, i := float64(real(value)), float64(imag(value))
-	enc.buf.AppendFloat(r, 64)
-	enc.buf.AppendByte('+')
-	enc.buf.AppendFloat(i, 64)
-	enc.buf.AppendByte('i')
-}
-
-func (enc *literalEncoder) AppendComplex64(value complex64) {
-	enc.AppendComplex128(complex128(value))
-}
-
-func (enc *literalEncoder) AppendFloat64(value float64) {
-	enc.addSeparator()
-	enc.buf.AppendFloat(value, 64)
-}
-
-func (enc *literalEncoder) AppendFloat32(value float32) {
-	enc.addSeparator()
-	enc.buf.AppendFloat(float64(value), 32)
-}
-
-func (enc *literalEncoder) AppendInt64(value int64) {
-	enc.addSeparator()
-	enc.buf.AppendInt(value)
-}
-
-func (enc *literalEncoder) AppendInt(v int)     { enc.AppendInt64(int64(v)) }
-func (enc *literalEncoder) AppendInt32(v int32) { enc.AppendInt64(int64(v)) }
-func (enc *literalEncoder) AppendInt16(v int16) { enc.AppendInt64(int64(v)) }
-func (enc *literalEncoder) AppendInt8(v int8)   { enc.AppendInt64(int64(v)) }
-
-func (enc *literalEncoder) AppendString(value string) {
-	enc.addSeparator()
-	enc.buf.AppendString(value)
-}
-
-func (enc *literalEncoder) AppendUint64(value uint64) {
-	enc.addSeparator()
-	enc.buf.AppendUint(value)
-}
-
-func (enc *literalEncoder) AppendUint(v uint)       { enc.AppendUint64(uint64(v)) }
-func (enc *literalEncoder) AppendUint32(v uint32)   { enc.AppendUint64(uint64(v)) }
-func (enc *literalEncoder) AppendUint16(v uint16)   { enc.AppendUint64(uint64(v)) }
-func (enc *literalEncoder) AppendUint8(v uint8)     { enc.AppendUint64(uint64(v)) }
-func (enc *literalEncoder) AppendUintptr(v uintptr) { enc.AppendUint64(uint64(v)) }
-
-func (enc *literalEncoder) AppendDuration(value time.Duration) {
-	cur := enc.buf.Len()
-	enc.EncodeDuration(value, enc)
-	if cur == enc.buf.Len() {
-		// User-supplied EncodeDuration is a no-op. Fall back to nanoseconds.
-		enc.AppendInt64(int64(value))
-	}
-}
-
-func (enc *literalEncoder) AppendTime(value time.Time) {
-	cur := enc.buf.Len()
-	enc.EncodeTime(value, enc)
-	if cur == enc.buf.Len() {
-		enc.AppendInt64(value.UnixNano())
-	}
-}
-
-func (enc *literalEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
-	return arr.MarshalLogArray(enc)
-}
-
-func (enc *literalEncoder) AppendObject(zapcore.ObjectMarshaler) error {
-	return ErrUnsupportedValueType
-}
-
-func (enc *literalEncoder) AppendReflected(value interface{}) error {
-	rvalue := reflect.ValueOf(value)
-	switch rvalue.Kind() {
-	case reflect.Bool:
-		enc.AppendBool(value.(bool))
-		return nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		enc.AppendInt64(rvalue.Int())
-		return nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		enc.AppendUint64(rvalue.Uint())
-		return nil
-	case reflect.Float32:
-		enc.AppendFloat32(value.(float32))
-		return nil
-	case reflect.Float64:
-		enc.AppendFloat64(value.(float64))
-		return nil
-	case reflect.Complex64:
-		enc.AppendComplex64(value.(complex64))
-		return nil
-	case reflect.Complex128:
-		enc.AppendComplex128(value.(complex128))
-		return nil
-	case reflect.String:
-		enc.AppendString(value.(string))
-		return nil
-	default:
-		return ErrUnsupportedValueType
-	}
-}
-
-func (enc *literalEncoder) addSeparator() {
-	if enc.buf.Len() > 0 {
-		enc.buf.AppendByte(',')
-	}
-}
-
 func needsQuotedValueRune(r rune) bool {
 	return r <= ' ' || r == '=' || r == '"' || r == utf8.RuneError
+}
+
+func keyRuneFilter(r rune) rune {
+	if needsQuotedValueRune(r) {
+		return -1
+	}
+	return r
 }
 
 func addFields(enc zapcore.ObjectEncoder, fields []zapcore.Field) {
 	for i := range fields {
 		fields[i].AddTo(enc)
 	}
-}
-
-// Register adds an encoder to zap named "logfmt" that can be used with
-// zapcore.EncoderConfig.
-func Register() {
-	zap.RegisterEncoder("logfmt", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
-		enc := NewEncoder(cfg)
-		return enc, nil
-	})
 }
