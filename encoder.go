@@ -286,7 +286,7 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 			final.AppendString(ent.Level.String())
 		}
 	}
-	if final.NameKey != "" {
+	if final.NameKey != "" && ent.LoggerName != "" {
 		final.addKey(enc.NameKey)
 		final.AppendString(ent.LoggerName)
 	}
