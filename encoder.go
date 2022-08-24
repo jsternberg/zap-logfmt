@@ -293,6 +293,10 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 			final.AppendString(ent.Level.String())
 		}
 	}
+	if final.NameKey != "" && ent.LoggerName != "" {
+		final.addKey(enc.NameKey)
+		final.AppendString(ent.LoggerName)
+	}
 	if ent.Caller.Defined && final.CallerKey != "" {
 		final.addKey(final.CallerKey)
 		cur := final.buf.Len()
