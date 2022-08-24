@@ -107,7 +107,7 @@ func assertOutput(t testing.TB, desc string, expected string, f func(zapcore.Enc
 	f(enc)
 	expectedPrefix := `foo=bar`
 	if expected != "" {
-		// If we expect output, it should be comma-separated from the previous
+		// If we expect output, it should be space-separated from the previous
 		// field.
 		expectedPrefix += " "
 	}
@@ -191,4 +191,26 @@ main.main()
 	assert.Nil(t, err)
 	assert.Equal(t, `k=v stacktrace="panic: an unexpected error occurred\n\ngoroutine 1 [running]:\nmain.main()\n\t\t/go/src/github.com/jsternberg/myawesomeproject/h2g2.go:4 +0x39\n"
 `, buf.String())
+}
+
+func TestEncodeEntryWithAddedField(t *testing.T) {
+	enc := &logfmtEncoder{buf: bufferpool.Get(), EncoderConfig: &zapcore.EncoderConfig{
+		EncodeTime:     zapcore.EpochTimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+	}}
+	enc.AddString("x", "y")
+
+	buf, err := enc.EncodeEntry(
+		zapcore.Entry{
+			Level:      zapcore.DebugLevel,
+			Time:       time.Time{},
+			LoggerName: "test",
+			Message:    "message",
+		},
+		[]zapcore.Field{
+			zap.String("k", "v"),
+		},
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "x=y k=v\n", buf.String())
 }
