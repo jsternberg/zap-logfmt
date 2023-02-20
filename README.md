@@ -95,7 +95,7 @@ be prepended with the namespace name. For example, with the namespace
 
 ## Attribution
 
-This is a fork of the original encoder from [github.com/jsternberg/zap-logfmt][jsternberg]. And pulling in and combinding additional fixes from other sources such as;
+This is a fork of the original encoder from [github.com/jsternberg/zap-logfmt][jsternberg]. And pulling in and combining additional fixes from other sources such as;
 
 * [github.com/jdechicchis/zap-logfmt][jdechicchis]
 * [github.com/sykesm/zap-logfmt][sykesm]

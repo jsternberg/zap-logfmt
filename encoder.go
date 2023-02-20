@@ -1,3 +1,4 @@
+// Package zaplogfmt provides a logfmt encoder for zap (https://github.com/uber-go/zap)
 package zaplogfmt
 
 import (
@@ -48,6 +49,7 @@ type logfmtEncoder struct {
 	namespaces []string
 }
 
+// NewEncoder creates an encoder interface for zap that writes logfmt formatted log entries.
 func NewEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	return &logfmtEncoder{
 		EncoderConfig: &cfg,
