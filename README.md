@@ -11,21 +11,21 @@ The encoder is simple to use.
 package main
 
 import (
-	"os"
+    "os"
 
-	"github.com/jsternberg/zap-logfmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+    "github.com/allir/zap-logfmt"
+    "go.uber.org/zap"
+    "go.uber.org/zap/zapcore"
 )
 
 func main() {
-	config := zap.NewProductionEncoderConfig()
-	logger := zap.New(zapcore.NewCore(
-		zaplogfmt.NewEncoder(config),
-		os.Stdout,
-		zapcore.DebugLevel,
-	))
-	logger.Info("Hello World")
+    config := zap.NewProductionEncoderConfig()
+    logger := zap.New(zapcore.NewCore(
+        zaplogfmt.NewEncoder(config),
+        os.Stdout,
+        zapcore.DebugLevel,
+    ))
+    logger.Info("Hello World")
 }
 ```
 
@@ -36,24 +36,24 @@ can do this:
 package main
 
 import (
-	"os"
+    "os"
 
-	"github.com/jsternberg/zap-logfmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+    "github.com/allir/zap-logfmt"
+    "go.uber.org/zap"
+    "go.uber.org/zap/zapcore"
 )
 
 func main() {
-	config := zap.NewProductionEncoderConfig()
-	config.EncodeTime = func(ts time.Time, encoder zapcore.PrimitiveArrayEncoder) {
-		encoder.AppendString(ts.UTC().Format(time.RFC3339))
-	}
-	logger := zap.New(zapcore.NewCore(
-		zaplogfmt.NewEncoder(config),
-		os.Stdout,
-		zapcore.DebugLevel,
-	))
-	logger.Info("Hello World")
+    config := zap.NewProductionEncoderConfig()
+    config.EncodeTime = func(ts time.Time, encoder zapcore.PrimitiveArrayEncoder) {
+        encoder.AppendString(ts.UTC().Format(time.RFC3339))
+    }
+    logger := zap.New(zapcore.NewCore(
+        zaplogfmt.NewEncoder(config),
+        os.Stdout,
+        zapcore.DebugLevel,
+    ))
+    logger.Info("Hello World")
 }
 ```
 
