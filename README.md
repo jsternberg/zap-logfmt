@@ -1,11 +1,10 @@
 # Logfmt Encoder
 
-This package implements logfmt for
-[zap](https://github.com/uber-go/zap).
+This package provides a logfmt encoder for [zap][zap].
 
 ## Usage
 
-The encoder is simple to use.
+The encoder is easy to configure. Simply create a new core with an instance of the logfmt encoder and use it with your preferred logging interface.
 
 ```go
 package main
@@ -29,8 +28,7 @@ func main() {
 }
 ```
 
-To use RFC3339 output for the time instead of an integer timestamp, you
-can do this:
+To use RFC3339 output for the time instead of an integer timestamp, you provide EncodeTime to the EncoderConfig:
 
 ```go
 package main
@@ -45,14 +43,38 @@ import (
 
 func main() {
     config := zap.NewProductionEncoderConfig()
-    config.EncodeTime = func(ts time.Time, encoder zapcore.PrimitiveArrayEncoder) {
-        encoder.AppendString(ts.UTC().Format(time.RFC3339))
-    }
+    config.EncodeTime = zapcore.RFC3339TimeEncoder
     logger := zap.New(zapcore.NewCore(
         zaplogfmt.NewEncoder(config),
         os.Stdout,
         zapcore.DebugLevel,
     ))
+    logger.Info("Hello World")
+}
+```
+
+An alternative way to set up the logger using the config builder. Also setting the time encoding to RFC3339.
+
+```go
+package main
+
+import (
+    _ "github.com/allir/zap-logfmt"
+    "go.uber.org/zap"
+    "go.uber.org/zap/zapcore"
+)
+
+func main() {
+    zapConfig := zap.NewProductionConfig()
+    zapConfig.EncoderConfig = zap.NewProductionEncoderConfig()
+    zapConfig.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
+    zapConfig.Encoding = "logfmt"
+
+    logger, err := zapConfig.Build()
+    if err != nil {
+        panic(err)
+    }
+
     logger.Info("Hello World")
 }
 ```
@@ -70,3 +92,15 @@ rendered.
 Namespaces are supported. If a namespace is opened, all of the keys will
 be prepended with the namespace name. For example, with the namespace
 `foo` and the key `bar`, you would get a key of `foo.bar`.
+
+## Attribution
+
+This is a fork of the original encoder from [github.com/jsternberg/zap-logfmt][jsternberg]. And pulling in and combinding additional fixes from other sources such as;
+
+* [github.com/jdechicchis/zap-logfmt][jdechicchis]
+* [github.com/sykesm/zap-logfmt][sykesm]
+
+[zap]: https://github.com/uber-go/zap
+[jsternberg]: https://github.com/jsternberg/zap-logfmt
+[jdechicchis]: https://github.com/jdechicchis/zap-logfmt
+[sykesm]: https://github.com/sykesm/zap-logfmt
