@@ -304,7 +304,7 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 		if cur == final.buf.Len() {
 			// User-supplied EncodeCaller was a no-op. Fall back to strings to
 			// keep output valid.
-			final.AppendString(ent.Caller.String())
+			final.AppendString(ent.Caller.FullPath())
 		}
 	}
 	if final.MessageKey != "" {
