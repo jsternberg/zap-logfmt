@@ -290,8 +290,7 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 		cur := final.buf.Len()
 		final.EncodeLevel(ent.Level, final)
 		if cur == final.buf.Len() {
-			// User-supplied EncodeLevel was a no-op. Fall back to strings to keep
-			// output valid.
+			// User-supplied EncodeLevel was a no-op. Fall back to strings to keep output valid.
 			final.AppendString(ent.Level.String())
 		}
 	}
@@ -304,9 +303,12 @@ func (enc *logfmtEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field)
 		cur := final.buf.Len()
 		final.EncodeCaller(ent.Caller, final)
 		if cur == final.buf.Len() {
-			// User-supplied EncodeCaller was a no-op. Fall back to strings to
-			// keep output valid.
-			final.AppendString(ent.Caller.FullPath())
+			// User-supplied EncodeCaller was a no-op. Fall back to strings to keep output valid.
+			final.AppendString(ent.Caller.String())
+		}
+		if final.FunctionKey != "" {
+			final.addKey(final.FunctionKey)
+			final.AppendString(ent.Caller.Function)
 		}
 	}
 	if final.MessageKey != "" {

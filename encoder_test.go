@@ -11,6 +11,35 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+func TestNewEncoder(t *testing.T) {
+	enc := NewEncoder(zapcore.EncoderConfig{
+		EncodeTime:     zapcore.EpochTimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+		MessageKey:     "msg",
+	})
+
+	var buf *buffer.Buffer
+	var err error
+	encodeEntry := func() {
+		buf, err = enc.EncodeEntry(
+			zapcore.Entry{
+				Level:      zapcore.DebugLevel,
+				Time:       time.Time{},
+				LoggerName: "test",
+				Message:    "encoder test",
+			},
+			[]zapcore.Field{
+				zap.String("k", "v"),
+			},
+		)
+	}
+
+	encodeEntry()
+	assert.Nil(t, err)
+	assert.Equal(t, "msg=\"encoder test\" k=v\n", buf.String())
+}
+
 func TestEncoderObjectFields(t *testing.T) {
 	tests := []struct {
 		desc     string
@@ -107,8 +136,7 @@ func assertOutput(t testing.TB, desc string, expected string, f func(zapcore.Enc
 	f(enc)
 	expectedPrefix := `foo=bar`
 	if expected != "" {
-		// If we expect output, it should be space-separated from the previous
-		// field.
+		// If we expect output, it should be space-separated from the previous field.
 		expectedPrefix += " "
 	}
 	assert.Equal(t, expectedPrefix+expected, enc.buf.String(), "Unexpected encoder output after adding a %s as a second field.", desc)
@@ -131,9 +159,10 @@ func TestEncodeCaller(t *testing.T) {
 				LoggerName: "test",
 				Message:    "caller test",
 				Caller: zapcore.EntryCaller{
-					Defined: true,
-					File:    "h2g2.go",
-					Line:    42,
+					Defined:  true,
+					File:     "h2g2.go",
+					Line:     42,
+					Function: "h2g2",
 				},
 			},
 			[]zapcore.Field{
@@ -148,9 +177,10 @@ func TestEncodeCaller(t *testing.T) {
 
 	enc.truncate()
 	enc.EncoderConfig.CallerKey = "caller"
+	enc.EncoderConfig.FunctionKey = "function"
 	encodeEntry()
 	assert.Nil(t, err)
-	assert.Equal(t, "caller=h2g2.go:42 k=v\n", buf.String())
+	assert.Equal(t, "caller=h2g2.go:42 function=h2g2 k=v\n", buf.String())
 }
 
 func TestEncodeName(t *testing.T) {

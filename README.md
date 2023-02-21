@@ -99,8 +99,10 @@ This is a fork of the original encoder from [github.com/jsternberg/zap-logfmt][j
 
 * [github.com/jdechicchis/zap-logfmt][jdechicchis]
 * [github.com/sykesm/zap-logfmt][sykesm]
+* [github.com/indra-kargo/zap-logfmt][indra-kargo]
 
 [zap]: https://github.com/uber-go/zap
 [jsternberg]: https://github.com/jsternberg/zap-logfmt
 [jdechicchis]: https://github.com/jdechicchis/zap-logfmt
 [sykesm]: https://github.com/sykesm/zap-logfmt
+[indra-kargo]: https://github.com/indra-kargo/zap-logfmt
