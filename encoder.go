@@ -31,7 +31,10 @@ var (
 	bufferpool = buffer.NewPool()
 )
 
-var ErrUnsupportedValueType = errors.New("unsupported value type")
+// Errors returned from this package may be tested against using errors.Is.
+var (
+	ErrUnsupportedValueType = errors.New("unsupported value type")
+)
 
 func getEncoder() *logfmtEncoder {
 	return _logfmtPool.Get().(*logfmtEncoder)
