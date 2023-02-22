@@ -21,9 +21,11 @@ func main() {
     config := zap.NewProductionEncoderConfig()
     logger := zap.New(zapcore.NewCore(
         zaplogfmt.NewEncoder(config),
-        os.Stdout,
+        zapcore.Lock(os.Stdout),
         zapcore.DebugLevel,
     ))
+    defer logger.Sync()
+
     logger.Info("Hello World")
 }
 ```
@@ -46,25 +48,28 @@ func main() {
     config.EncodeTime = zapcore.RFC3339TimeEncoder
     logger := zap.New(zapcore.NewCore(
         zaplogfmt.NewEncoder(config),
-        os.Stdout,
+        zapcore.Lock(os.Stdout),
         zapcore.DebugLevel,
     ))
+    defer logger.Sync()
+
     logger.Info("Hello World")
 }
 ```
 
-An alternative way to set up the logger using the config builder. Also setting the time encoding to RFC3339.
+An alternative way to set up the logger by registering the encoder and using it with the config builder. Also setting the time encoding to RFC3339.
 
 ```go
 package main
 
 import (
-    _ "github.com/allir/zap-logfmt"
+    zaplogfmt "github.com/allir/zap-logfmt"
     "go.uber.org/zap"
     "go.uber.org/zap/zapcore"
 )
 
 func main() {
+    zaplogfmt.Register()
     zapConfig := zap.NewProductionConfig()
     zapConfig.EncoderConfig = zap.NewProductionEncoderConfig()
     zapConfig.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
@@ -74,6 +79,7 @@ func main() {
     if err != nil {
         panic(err)
     }
+    defer logger.Sync()
 
     logger.Info("Hello World")
 }

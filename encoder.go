@@ -18,11 +18,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const (
-	// For JSON-escaping; see logfmtEncoder.safeAddString below.
-	_hex = "0123456789abcdef"
-)
-
 var (
 	_logfmtPool = sync.Pool{New: func() interface{} {
 		return &logfmtEncoder{}
@@ -407,6 +402,9 @@ func (enc *logfmtEncoder) safeAddByteString(s []byte) {
 
 // tryAddRuneSelf appends b if it is valid UTF-8 character represented in a single byte.
 func (enc *logfmtEncoder) tryAddRuneSelf(b byte) bool {
+	// For JSON-escaping; see logfmtEncoder.safeAddString below.
+	const hex = "0123456789abcdef"
+
 	if b >= utf8.RuneSelf {
 		return false
 	}
@@ -430,8 +428,8 @@ func (enc *logfmtEncoder) tryAddRuneSelf(b byte) bool {
 	default:
 		// Encode bytes < 0x20, except for the escape sequences above.
 		enc.buf.AppendString(`\u00`)
-		enc.buf.AppendByte(_hex[b>>4])
-		enc.buf.AppendByte(_hex[b&0xF])
+		enc.buf.AppendByte(hex[b>>4])
+		enc.buf.AppendByte(hex[b&0xF])
 	}
 	return true
 }
@@ -586,7 +584,9 @@ func addFields(enc zapcore.ObjectEncoder, fields []zapcore.Field) {
 	}
 }
 
-func init() {
+// Register adds an encoder to zap named "logfmt" that can be used with
+// zapcore.EncoderConfig.
+func Register() {
 	zap.RegisterEncoder("logfmt", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
 		enc := NewEncoder(cfg)
 		return enc, nil
